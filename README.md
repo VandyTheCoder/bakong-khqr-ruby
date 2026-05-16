@@ -7,10 +7,10 @@ app in Cambodia. Generate, decode, and verify KHQR payloads, and talk to the
 Bakong Open API.
 
 This is a Ruby port of the official
-[`bakong-khqr`](https://www.npmjs.com/package/bakong-khqr) JavaScript SDK by
-Devit Huotkeo. The public API mirrors the npm package one-to-one; only the
-naming has been Ruby-fied (snake_case methods and hash keys). Zero runtime gem
-dependencies — uses only the Ruby standard library.
+[`bakong-khqr`](https://www.npmjs.com/package/bakong-khqr) JavaScript SDK.
+The public API mirrors the npm package one-to-one; only the naming has been
+Ruby-fied (snake_case methods and hash keys). Zero runtime gem dependencies —
+uses only the Ruby standard library.
 
 > **KHQR ~ Scan. Pay. Done.**
 
@@ -210,7 +210,7 @@ Issues and pull requests are welcome at
 
 ## Credits
 
-- Upstream JavaScript SDK: [bakong-khqr](https://www.npmjs.com/package/bakong-khqr) by [Devit Huotkeo](https://github.com/davidhuotkeo).
+- Upstream JavaScript SDK: [bakong-khqr](https://www.npmjs.com/package/bakong-khqr).
 - KHQR specification: [National Bank of Cambodia](https://bakong.nbc.gov.kh/).
 
 ## License

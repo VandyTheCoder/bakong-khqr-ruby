@@ -11,7 +11,7 @@ Gem::Specification.new do |spec|
   spec.summary       = "Ruby SDK for KHQR (Khmer QR Code) — generate, decode, and verify Bakong KHQR strings."
   spec.description   = <<~DESC
     A Ruby port of the official bakong-khqr JavaScript SDK
-    (https://www.npmjs.com/package/bakong-khqr) by Devit Huotkeo.
+    (https://www.npmjs.com/package/bakong-khqr).
 
     Generate Individual and Merchant KHQR payloads, decode existing KHQR strings,
     verify the embedded CRC-16/CCITT-FALSE checksum, and call the Bakong Open API

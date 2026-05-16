@@ -24,8 +24,8 @@ require_relative "khqr/controllers/decode_validation"
 
 module Bakong
   # Top-level facade for the bakong-khqr SDK. Mirrors the public surface of the
-  # upstream JavaScript package (https://www.npmjs.com/package/bakong-khqr) by
-  # Devit Huotkeo: generate, decode, verify, plus the Bakong Open API helpers.
+  # upstream JavaScript package (https://www.npmjs.com/package/bakong-khqr):
+  # generate, decode, verify, plus the Bakong Open API helpers.
   module Khqr
     CRC_REGEXP = /6304[A-Fa-f0-9]{4}\z/
 
