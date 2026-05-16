@@ -189,6 +189,16 @@ list.
 | `new SourceInfo(icon, name, cb)`                 | `Bakong::Khqr::SourceInfo.new(...)` (keyword args)      |
 | `khqrData.currency.{khr,usd}`                    | `Bakong::Khqr::CURRENCY[:khr]`, `Bakong::Khqr::CURRENCY[:usd]` |
 
+## About the `bakong-*` namespace
+
+The `bakong-` prefix is used as an **umbrella namespace** for Cambodian
+payment-system gems — the same convention as `aws-sdk-*` and
+`google-cloud-*`. Each `bakong-*` gem is independent and installable on its
+own, but they share the top-level `Bakong::` module so they compose cleanly
+in the same codebase. Today the family is `bakong-khqr` and
+[bakong-open-api](https://rubygems.org/gems/bakong-open-api); more may
+follow as the Bakong ecosystem grows.
+
 ## Development
 
 ```sh
