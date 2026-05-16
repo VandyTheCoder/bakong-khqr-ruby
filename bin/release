@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+#
+# bin/release vX.Y.Z
+#
+# End-to-end release pipeline for the bakong-khqr gem:
+#   1. validate args + prerequisites
+#   2. bump VERSION constant
+#   3. run RSpec
+#   4. build the .gem
+#   5. commit + tag
+#   6. push to RubyGems (prompts for MFA OTP)
+#   7. push commit + tag to origin
+#   8. create the GitHub release
+#   9. clean up the build artifact
+#
+# Required environment:
+#   - $RUBY_GEM_KEY    rubygems.org API key (push_rubygem scope)
+#   - $GEM_HOST_OTP_CODE  optional; if absent the script will prompt
+#
+# Required tooling: ruby, bundler, gh, git.
+#
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# ── config ────────────────────────────────────────────────────────────────────
+GEM_NAME="bakong-khqr"
+GEMSPEC="${GEM_NAME}.gemspec"
+VERSION_FILE="lib/bakong/khqr/version.rb"
+CHANGELOG="CHANGELOG.md"
+REMOTE="origin"
+MAIN_BRANCH="main"
+
+# ── output helpers ───────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+  BOLD=$(printf '\033[1m'); DIM=$(printf '\033[2m')
+  GREEN=$(printf '\033[32m'); RED=$(printf '\033[31m')
+  YELLOW=$(printf '\033[33m'); RESET=$(printf '\033[0m')
+else
+  BOLD=""; DIM=""; GREEN=""; RED=""; YELLOW=""; RESET=""
+fi
+step() { echo "${BOLD}==>${RESET} $*"; }
+ok()   { echo "    ${GREEN}✓${RESET} $*"; }
+warn() { echo "    ${YELLOW}!${RESET} $*"; }
+die()  { echo "${RED}error:${RESET} $*" >&2; exit 1; }
+
+# ── argument parsing ─────────────────────────────────────────────────────────
+[ $# -eq 1 ] || die "usage: bin/release vX.Y.Z"
+TAG="$1"
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]] \
+  || die "'$TAG' is not a valid semver tag (expected vMAJOR.MINOR.PATCH)"
+VERSION="${TAG#v}"
+
+# ── prerequisite checks ──────────────────────────────────────────────────────
+step "Checking prerequisites"
+for cmd in ruby bundle gh git gem; do
+  command -v "$cmd" >/dev/null 2>&1 || die "$cmd is not installed or not on PATH"
+done
+[ -n "${RUBY_GEM_KEY:-}" ] || die "RUBY_GEM_KEY is not set (export it in ~/.zshrc)"
+gh auth status >/dev/null 2>&1 || die "gh CLI is not authenticated (run: gh auth login)"
+ok "ruby/bundle/gh/git/gem present, RUBY_GEM_KEY set, gh authenticated"
+
+# ── git sanity ───────────────────────────────────────────────────────────────
+step "Verifying git state"
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+[ "$CURRENT_BRANCH" = "$MAIN_BRANCH" ] \
+  || die "must release from '$MAIN_BRANCH' (currently on '$CURRENT_BRANCH')"
+git diff --quiet && git diff --cached --quiet \
+  || { git status --short; die "working tree has uncommitted changes"; }
+git rev-parse "$TAG" >/dev/null 2>&1 \
+  && die "tag $TAG already exists locally"
+if git ls-remote --tags "$REMOTE" "refs/tags/$TAG" | grep -q "$TAG"; then
+  die "tag $TAG already exists on $REMOTE"
+fi
+git fetch "$REMOTE" "$MAIN_BRANCH" --quiet
+LOCAL_SHA=$(git rev-parse HEAD)
+REMOTE_SHA=$(git rev-parse "$REMOTE/$MAIN_BRANCH")
+[ "$LOCAL_SHA" = "$REMOTE_SHA" ] \
+  || die "local $MAIN_BRANCH is out of sync with $REMOTE/$MAIN_BRANCH (pull/push first)"
+ok "on $MAIN_BRANCH, clean, in sync with $REMOTE, tag $TAG is free"
+
+# ── duplicate gem check ──────────────────────────────────────────────────────
+step "Checking RubyGems for existing $VERSION"
+if gem list -r "^${GEM_NAME}$" 2>/dev/null | grep -qE " \(.*\b${VERSION}\b.*\)"; then
+  die "$GEM_NAME $VERSION is already published on rubygems.org"
+fi
+ok "$GEM_NAME $VERSION is unpublished"
+
+# ── version bump ─────────────────────────────────────────────────────────────
+step "Bumping VERSION to $VERSION in $VERSION_FILE"
+CURRENT_VERSION=$(ruby -r./"$VERSION_FILE" -e 'puts Bakong::Khqr::VERSION')
+[ "$CURRENT_VERSION" != "$VERSION" ] \
+  || die "VERSION is already $VERSION — nothing to bump"
+sed -i.bak "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" "$VERSION_FILE"
+rm "${VERSION_FILE}.bak"
+grep -q "VERSION = \"$VERSION\"" "$VERSION_FILE" \
+  || die "version bump did not apply"
+ok "$CURRENT_VERSION → $VERSION"
+
+# ── changelog check (soft) ───────────────────────────────────────────────────
+step "Checking $CHANGELOG"
+if grep -q "## \[$VERSION\]" "$CHANGELOG"; then
+  ok "found '## [$VERSION]' section"
+else
+  warn "no '## [$VERSION]' section in $CHANGELOG"
+  printf "    Continue without a changelog entry? [y/N] "
+  read -r CONFIRM
+  if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
+    git checkout -- "$VERSION_FILE"
+    die "aborted; please update $CHANGELOG and retry"
+  fi
+fi
+
+# ── tests ────────────────────────────────────────────────────────────────────
+step "Running RSpec"
+if ! bundle exec rspec >/tmp/rspec-release.log 2>&1; then
+  cat /tmp/rspec-release.log
+  git checkout -- "$VERSION_FILE"
+  die "tests failed; reverting VERSION bump"
+fi
+ok "$(grep -E '[0-9]+ examples?, [0-9]+ failures?' /tmp/rspec-release.log | tail -1)"
+
+# ── build ────────────────────────────────────────────────────────────────────
+step "Building gem"
+GEM_FILE="${GEM_NAME}-${VERSION}.gem"
+gem build "$GEMSPEC" >/dev/null
+[ -f "$GEM_FILE" ] || die "expected $GEM_FILE but it was not produced"
+ok "$GEM_FILE built"
+
+# ── commit + tag ─────────────────────────────────────────────────────────────
+step "Committing and tagging $TAG"
+git add "$VERSION_FILE"
+git add "$CHANGELOG" 2>/dev/null || true
+git commit -m "Release $TAG" --quiet
+git tag -a "$TAG" -m "Release $TAG"
+ok "committed $(git rev-parse --short HEAD) and tagged $TAG"
+
+# ── OTP ──────────────────────────────────────────────────────────────────────
+if [ -z "${GEM_HOST_OTP_CODE:-}" ]; then
+  printf "${BOLD}==>${RESET} Enter RubyGems MFA OTP (6 digits): "
+  read -r GEM_HOST_OTP_CODE
+fi
+[ -n "${GEM_HOST_OTP_CODE:-}" ] || die "OTP is required"
+
+# From here on, a failure leaves the repo with an unpushed commit+tag.
+# Print rollback instructions if anything below fails.
+rollback_hint() {
+  cat <<MSG >&2
+
+${YELLOW}Release aborted after commit/tag.${RESET} Local state has been left intact.
+To roll back the version bump:
+  git tag -d $TAG
+  git reset --hard HEAD~1
+To resume after fixing the issue (e.g. fresh OTP):
+  bin/release $TAG    # but first: git tag -d $TAG && git reset --hard HEAD~1
+MSG
+}
+trap rollback_hint ERR
+
+# ── publish to rubygems ──────────────────────────────────────────────────────
+step "Publishing $GEM_FILE to RubyGems"
+GEM_HOST_API_KEY="$RUBY_GEM_KEY" GEM_HOST_OTP_CODE="$GEM_HOST_OTP_CODE" \
+  gem push "$GEM_FILE"
+ok "$GEM_NAME $VERSION published"
+
+# ── push git ─────────────────────────────────────────────────────────────────
+step "Pushing $MAIN_BRANCH and $TAG to $REMOTE"
+git push "$REMOTE" "$MAIN_BRANCH" --quiet
+git push "$REMOTE" "$TAG" --quiet
+ok "git push complete"
+
+# ── github release ───────────────────────────────────────────────────────────
+step "Creating GitHub release"
+if grep -q "## \[$VERSION\]" "$CHANGELOG"; then
+  NOTES=$(awk "/^## \\[$VERSION\\]/{flag=1;print;next} /^## \\[/{flag=0} flag" "$CHANGELOG")
+else
+  NOTES="Release $TAG"
+fi
+gh release create "$TAG" --title "$TAG" --notes "$NOTES" >/dev/null
+ok "release published"
+
+trap - ERR
+
+# ── cleanup ──────────────────────────────────────────────────────────────────
+rm -f "$GEM_FILE"
+
+REPO_URL=$(gh repo view --json url --jq .url)
+cat <<EOF
+
+${BOLD}${GREEN}Released $TAG${RESET}
+  ${DIM}rubygems:${RESET} https://rubygems.org/gems/${GEM_NAME}/versions/${VERSION}
+  ${DIM}github:  ${RESET} ${REPO_URL}/releases/tag/${TAG}
+EOF
