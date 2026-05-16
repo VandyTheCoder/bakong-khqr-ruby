@@ -1,6 +1,6 @@
 # bakong-khqr
 
-[![Gem Version](https://badge.fury.io/rb/bakong-khqr.svg)](https://rubygems.org/gems/bakong-khqr)
+[![Gem Version](https://badge.fury.io/rb/bakong-khqr.svg?icon=si%3Arubygems)](https://rubygems.org/gems/bakong-khqr)
 
 A Ruby SDK for **KHQR** — the centralized QR Code used by every mobile banking
 app in Cambodia. Generate, decode, and verify KHQR payloads, and talk to the
